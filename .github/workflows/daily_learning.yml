@@ -1,0 +1,35 @@
+name: 🇯🇵 N2 Daily Spartan
+on:
+  schedule:
+    - cron: '0 0 * * *' # 每天早上 08:00
+  workflow_dispatch: # 允許手動按按鈕測試
+
+jobs:
+  study_session:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 必須有寫入權限才能存單字
+    
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.10' }
+        
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        
+      - name: Run Bot
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python main.py
+        
+      - name: Save Vocabulary
+        run: |
+          git config --global user.name "N2 Bot"
+          git config --global user.email "bot@n2spartan.com"
+          git pull --rebase origin main
+          git add vocab.json || true
+          git commit -m "📚 Vocabulary Updated" || echo "No changes"
+          git push

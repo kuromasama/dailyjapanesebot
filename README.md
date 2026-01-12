@@ -1,15 +1,48 @@
-# Python UV Starter
+# 🇯🇵 Project N2 Spartan (日文衝刺計畫)
 
-This is a simple Python [uv](https://docs.astral.uv) starter in Firebase Studio.
+這是一個專屬於妳的 AI 日文家教，目標是在 7 月拿下 JLPT N2！
 
-## Running
+## ✨ 它能做什麼？
+1.  **單字隨手記**：在 Telegram 傳送單字，機器人會自動收錄。
+2.  **🧠 自動記憶機制**：
+    * **不用打星號！** 只要是妳覺得不熟的字，就再傳一次給機器人。
+    * 機器人會自動計算：「這個字妳查了 3 次，代表很不熟」，它就會在每天的考試中**拼命考妳這個字**，直到妳背起來為止。
+3.  **每日斯巴達特訓**：每天早上 08:00 推播：
+    * 重點單字複習（含 N2 例句）。
+    * 5 題日翻中。
+    * 5 題中翻日（訓練大腦輸出）。
 
-```
-uv run main.py
-```
+## 🚀 如何開始 (只要給 Aaron 三把鑰匙)
 
-## Add dependencies
+因為程式碼已經設定好了，妳只需要申請「鑰匙」讓機器人啟動：
 
-```
-uv add ruff
-```
+### 1. 申請 Google 鑰匙 (AI 的大腦)
+* 前往 [Google AI Studio](https://aistudio.google.com/app/apikey)。
+* 點擊 **Create API key**。
+* 複製那串以 `AIza` 開頭的密碼。
+
+### 2. 申請 Telegram 鑰匙 (機器人的身體)
+* 在 Telegram 搜尋 `@BotFather`。
+* 輸入指令 `/newbot`。
+* 幫機器人取個名字 (例如: `Lisa_N2_Bot`)。
+* 它會給妳一串紅色的 **Token**。
+
+### 3. 取得妳的 ID (讓機器人知道傳給誰)
+* 在 Telegram 搜尋 `@userinfobot`。
+* 它會告訴妳一串數字 **ID**。
+
+👉 **最後：把這三組資料傳給我 ，我填進去就搞定了！**
+
+---
+
+## 📝 怎麼存單字？
+
+請依照這個格式傳送訊息給機器人 (中間要有空白)：
+
+`漢字 假名 中文意思`
+
+### 範例：
+> `我慢 がまん 忍耐`
+> `雰囲気 ふんいき 氣氛`
+
+(記得！如果不熟，就多傳幾次，機器人會自動幫妳加強記憶！)
