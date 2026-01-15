@@ -25,17 +25,16 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        # 👇 這裡修改了檔名
-        run: python Daily_Japanese_v0.0.1.py
+        # 👇 記得要對應新的檔名
+        run: python Daily_Japanese_v0.0.2.py
         
       - name: Commit and Push
         run: |
           git config --global user.name "N2 Bot"
           git config --global user.email "bot@github.com"
           
-          # 👇 確保所有數據檔都被加入
           git add vocab.json user_data.json
           
-          git commit -m "📊 Update User Stats & Vocab" || echo "No changes"
+          git commit -m "📊 Update Data" || echo "No changes"
           git pull origin HEAD --no-rebase
           git push
