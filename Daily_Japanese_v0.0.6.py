@@ -73,6 +73,7 @@ def ai_correction(user_text, translation_history):
     print(f"🤖 AI 正在批改 (合併後長度 {len(user_text)}): {user_text[:20]}...")
     history_str = "\n".join(translation_history[-10:]) if translation_history else "(尚無歷史紀錄)"
     
+    # 📝 批改提示詞：維持詳細版
     prompt = f"""
     使用者正在練習日文，這是她剛剛傳來的內容（可能包含多則訊息的合併）：
     「{user_text}」
@@ -115,8 +116,8 @@ def process_data():
             "execution_count": 0,
             "last_quiz_date": "2000-01-01",
             "last_quiz_questions_count": 0,
-            "daily_answers_count": 0,       # 今日必修回答數
-            "bonus_answers_count": 0,       # 今日 Bonus 回答數
+            "daily_answers_count": 0,
+            "bonus_answers_count": 0,
             "yesterday_main_score": 0,
             "yesterday_bonus_score": 0,
             "last_update_id": 0
@@ -125,15 +126,10 @@ def process_data():
         "translation_log": []
     })
     
-    # 初始化防呆
     stats = user_data["stats"]
-    if "daily_answers_count" not in stats: stats["daily_answers_count"] = 0
-    if "bonus_answers_count" not in stats: stats["bonus_answers_count"] = 0
-    if "yesterday_main_score" not in stats: stats["yesterday_main_score"] = 0
-    if "yesterday_bonus_score" not in stats: stats["yesterday_bonus_score"] = 0
-    if "execution_count" not in stats: stats["execution_count"] = 0
-    if "streak_days" not in stats: stats["streak_days"] = 0
-    if "last_update_id" not in stats: stats["last_update_id"] = 0
+    for key in ["daily_answers_count", "bonus_answers_count", "yesterday_main_score", 
+                "yesterday_bonus_score", "execution_count", "streak_days", "last_update_id"]:
+        if key not in stats: stats[key] = 0
 
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates"
     
@@ -241,7 +237,7 @@ def process_data():
                 user_data["stats"]["last_update_id"] = max_id_in_this_run
                 is_updated = True
 
-        # === 計分邏輯 (必修 vs Bonus) ===
+        # === 計分邏輯 ===
         if today_answers_detected > 0:
             current_main = user_data["stats"]["daily_answers_count"]
             main_quota = 10 
@@ -277,14 +273,14 @@ def process_data():
         print(f"Error: {e}")
         return load_json(VOCAB_FILE, {}), load_json(USER_DATA_FILE, {})
 
-# ================= 每日特訓生成 (Bonus 邏輯) =================
+# ================= 每日特訓生成 (Prompt 修正版) =================
 
 def run_daily_quiz(vocab, user):
     if not vocab.get("words"):
         send_telegram("📭 單字庫空的！請傳送單字或匯入 JSON。")
         return user
     
-    # ✅ 1. 無論是每日必修還是 Bonus，只要有 Pending Answer，先發送！
+    # 1. 每次執行先發詳解
     pending_answers = user.get("pending_answers", "")
     if pending_answers:
         send_telegram(f"🗝️ **前次測驗詳解**\n\n{pending_answers}")
@@ -304,56 +300,80 @@ def run_daily_quiz(vocab, user):
 
     # ================= Scenario A: 新的一天 (每日必修) =================
     if is_new_day:
-        # 結算昨天
         user["stats"]["yesterday_main_score"] = user["stats"]["daily_answers_count"]
         user["stats"]["yesterday_bonus_score"] = user["stats"]["bonus_answers_count"]
-        
-        # 重置今日
         user["stats"]["daily_answers_count"] = 0
         user["stats"]["bonus_answers_count"] = 0
         
-        # 增加次數
         user["stats"]["execution_count"] += 1
         exec_count = user["stats"]["execution_count"]
         streak_days = user["stats"]["streak_days"]
         
-        # 情緒 Prompt
         is_first_run = (user["stats"]["last_quiz_date"] == "2000-01-01") or (exec_count == 1)
         main_score = user["stats"]["yesterday_main_score"]
         bonus_score = user["stats"]["yesterday_bonus_score"]
         
         emotion_prompt = ""
         if is_first_run:
-            emotion_prompt = "這是第一次見面 (Day 1)。請熱情歡迎，介紹模式：每日出題，下次給解答。"
+            emotion_prompt = """
+            這是你第一次與使用者見面 (Day 1)。
+            **請注意：請全程使用繁體中文 (Traditional Chinese)。**
+            請用充滿活力、專業且期待的語氣打招呼。
+            自我介紹你是「N2 斯巴達 AI 教練」，並說明未來的訓練模式：
+            「每天中午我會出題，隔天中午我會檢討昨天的作業並出新題目。」
+            請給予使用者滿滿的信心！
+            """
         else:
             answer_rate = main_score / 10
             if answer_rate >= 0.8:
                 if bonus_score > 0:
                     emotion_prompt = f"昨日表現：必修 {main_score}/10，Bonus {bonus_score}。狀態：神一般的自律！請用極度崇拜語氣誇獎！"
                 else:
-                    emotion_prompt = f"昨日表現：必修 {main_score}/10。狀態：優秀。"
+                    emotion_prompt = f"昨日表現：必修 {main_score}/10。狀態：優秀。給予高度肯定。"
             elif answer_rate >= 0.3:
                 emotion_prompt = f"昨日表現：必修 {main_score}/10。狀態：尚可。提醒要更努力。"
             else:
-                emotion_prompt = f"昨日表現：必修 {main_score}/10。狀態：偷懶！開啟【幽默情勒模式】。"
+                emotion_prompt = f"""
+                昨日表現：必修 {main_score}/10。狀態：偷懶！
+                請開啟【幽默情勒模式 😈】。
+                用有點受傷但又好笑的語氣，質問她是不是被被窩綁架了？
+                還是覺得 N2 太簡單不屑寫？
+                **請全程使用繁體中文。**
+                """
 
         print("🤖 生成每日必修 (10題)...")
+        
+        # 🔥🔥🔥 修正點：使用 v0.0.5 的詳細提示詞 🔥🔥🔥
         prompt = f"""
         你是日文 N2 斯巴達教練。
-        這是第 {exec_count} 次特訓 (Day {streak_days})。
         
-        【情緒設定】
+        【系統資訊】
+        這是第 {exec_count} 次特訓。
+        這是連續第 {streak_days} 天的挑戰 (Day {streak_days})。
+        
+        【情緒與開場】
         {emotion_prompt}
+        請在開場白中明確提到：「這是我們的第 {exec_count} 次特訓 (Day {streak_days})！」。
         
-        【今日單字】
+        【今日單字庫】
         {word_list}
         
         請製作 **10 題** 翻譯測驗 (7題中翻日，3題日翻中)。
         
-        【輸出格式】
-        1. Part 1: 題目卷 (繁體中文+Emoji，無HTML，無答案)。
-        2. 分隔線 `|||SEPARATOR|||`
-        3. Part 2: 解答卷 (下次發送)。
+        【輸出格式要求 (嚴格遵守)】
+        1. **語言**：
+           - 開場白、單字預習、題目說明：**全程使用繁體中文**。
+           - 題目本身：日文或中文。
+        
+        2. **排版**：
+           - **嚴禁** 使用 Markdown 標題 (如 # 或 ##)。
+           - 請使用 Emoji (如 ⚔️, 📚, 📝, 🔹) 來區隔段落與項目。
+           - **嚴禁** 使用 HTML 標籤 (如 <br>)，請直接換行。
+        
+        3. **結構**：
+           - Part 1: 題目卷 (含開場、單字、10題)。**不要**給答案。
+           - 分隔線: `|||SEPARATOR|||`
+           - Part 2: 解答卷 (含參考答案與解析)。
         """
         
         try:
@@ -361,7 +381,7 @@ def run_daily_quiz(vocab, user):
             if response.text and "|||SEPARATOR|||" in response.text:
                 parts = response.text.split("|||SEPARATOR|||")
                 send_telegram(parts[0].strip())
-                user["pending_answers"] = parts[1].strip() # 存入解答
+                user["pending_answers"] = parts[1].strip()
                 
                 user["stats"]["last_quiz_date"] = today_str
                 user["stats"]["last_quiz_questions_count"] = 10
@@ -369,25 +389,35 @@ def run_daily_quiz(vocab, user):
             print(f"Error: {e}")
             send_telegram("⚠️ 測驗生成失敗")
 
-    # ================= Scenario B: 同一天再次執行 (Bonus 模式) =================
+    # ================= Scenario B: Bonus 模式 =================
     else:
         print("🤖 生成 Bonus 挑戰 (3題)...")
         
+        # 📝 Bonus 提示詞 (已經是詳細版，維持不變)
         prompt = f"""
         你是日文 N2 斯巴達教練。
         使用者今天已經領過每日作業了，但她**主動**再次執行程式，表示她想要更多練習！
         
-        請用「驚喜、讚嘆」的語氣，稱讚她的積極度。
+        請用「驚喜、讚嘆」的語氣，稱讚她的積極度（例如：「天啊！寫完作業還不夠？竟然還要加練？」）。
         並提供 **3 題** 高難度的 N2 翻譯挑戰 (Bonus Challenge)。
         
-        【今日單字】
+        【今日單字庫】
         {word_list}
         
-        【輸出格式】
-        1. Part 1: Bonus 題目卷 (繁體中文+Emoji，無HTML，無答案)。
-           標題請寫：⚔️ **Bonus 無限挑戰** ⚔️
-        2. 分隔線 `|||SEPARATOR|||`
-        3. Part 2: 解答卷 (下次發送)。
+        【輸出格式要求 (嚴格遵守)】
+        1. **語言**：
+           - 開場白、題目說明：**全程使用繁體中文**。
+        
+        2. **排版**：
+           - **嚴禁** 使用 Markdown 標題 (如 # 或 ##)。
+           - 請使用 Emoji (如 🔥, 🚀, 💡, 🌟) 來區隔段落。
+           - 標題請寫：⚔️ **Bonus 無限挑戰** ⚔️
+           - **嚴禁** 使用 HTML 標籤 (如 <br>)，請直接換行。
+        
+        3. **結構**：
+           - Part 1: Bonus 題目卷 (含開場、3題高難度題目)。**不要**給答案。
+           - 分隔線: `|||SEPARATOR|||`
+           - Part 2: 解答卷 (含參考答案與解析)。
         """
 
         try:
@@ -395,10 +425,6 @@ def run_daily_quiz(vocab, user):
             if response.text and "|||SEPARATOR|||" in response.text:
                 parts = response.text.split("|||SEPARATOR|||")
                 send_telegram(parts[0].strip())
-                
-                # ✅ 關鍵：直接存入，下次執行時會被上面的邏輯發送
-                # 如果使用者連續跑多次 Bonus，這裡會覆蓋掉上一個 Bonus 的解答
-                # 這是正確的，因為使用者應該要先看到上一個 Bonus 的解答，再領新的 Bonus 題目
                 user["pending_answers"] = parts[1].strip() 
                 
         except Exception as e:
