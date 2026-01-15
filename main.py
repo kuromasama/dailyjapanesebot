@@ -12,7 +12,15 @@ TG_BOT_TOKEN = os.getenv("TG_BOT_TOKEN")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
 VOCAB_FILE = "vocab.json"
-MODEL_NAME = 'models/gemini-1.5-flash' # 語言學習用 1.5 Flash 最穩
+MODEL_NAME = 'models/gemini-1.5-flash'
+
+# 安全設定 (防止 AI 拒絕回答)
+SAFETY_SETTINGS = [
+    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+]
 
 # ================= 工具函式 =================
 
@@ -32,7 +40,7 @@ def save_vocab(data):
 def send_telegram(message):
     if not TG_BOT_TOKEN: print(f"[模擬發送] {message[:50]}..."); return
     
-    # 清洗 Markdown 符號，確保手機版閱讀舒適
+    # 清洗 Markdown 符號
     clean_msg = message.replace("**", "").replace("##", "").replace("__", "")
     
     try:
@@ -42,39 +50,31 @@ def send_telegram(message):
     except Exception as e: print(f"TG 發送失敗: {e}")
 
 def normalize_text(text):
-    """ 去除空白與轉小寫，用於比對是否重複 """
     return text.strip().replace("　", " ").lower()
 
 # ================= 邏輯：處理使用者輸入 (存單字) =================
 
 def process_updates():
-    """ 讀取 TG 訊息，尋找新單字並存入 """
     print("📥 檢查是否有新單字...")
     url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/getUpdates"
     
     try:
         response = requests.get(url).json()
-        if "result" not in response: return
+        if "result" not in response: return load_vocab()
         
         vocab_data = load_vocab()
         is_updated = False
         updates_log = []
 
-        # 簡單的去重機制，避免同一次執行重複處理同一則訊息
-        # (在正式 Serverless 架構通常用 webhook，這裡用簡易輪詢)
-        
         for item in response["result"]:
-            # 檢查是否為目標使用者的訊息
             if str(item["message"]["chat"]["id"]) != str(TG_CHAT_ID): continue
             
-            # 只處理 24 小時內的訊息
             msg_time = datetime.fromtimestamp(item["message"]["date"])
             if datetime.now() - msg_time > timedelta(hours=24): continue
             
             text = item["message"].get("text", "").strip()
             
             # Regex 解析：漢字 空白 假名 空白 意思
-            # 容許全形/半形空白
             match = re.search(r"^(\S+)[ \u3000]+(\S+)[ \u3000]+(.+)$", text)
             
             if match:
@@ -85,7 +85,6 @@ def process_updates():
                 for word in vocab_data["words"]:
                     if normalize_text(word["kanji"]) == normalize_text(kanji) and \
                        normalize_text(word["kana"]) == normalize_text(kana):
-                        # 重複輸入 -> 增加計數 (熟悉度降低，需多練習)
                         word["count"] = word.get("count", 0) + 1
                         word["last_review"] = str(datetime.now().date())
                         updates_log.append(f"🔄 強化記憶：{kanji} (累計 {word['count']} 次)")
@@ -107,9 +106,8 @@ def process_updates():
 
         if is_updated:
             save_vocab(vocab_data)
-            # 回報收錄狀況
             if updates_log:
-                send_telegram("\n".join(set(updates_log))) # set() 簡單去重
+                send_telegram("\n".join(set(updates_log)))
         
         return vocab_data
 
@@ -120,17 +118,15 @@ def process_updates():
 # ================= 每日特訓生成 =================
 
 def run_daily_quiz(data):
-    if not data["words"]:
+    if not data.get("words"):
         send_telegram("📭 單字庫是空的！請傳送單字給我 (格式: 漢字 假名 意思)")
         return
 
-    # 1. 權重抽樣 (輸入越多次 count 越高，越容易被抽到)
+    # 1. 權重抽樣
     weights = [w.get("count", 1) * 5 for w in data["words"]]
-    # 抽取樣本數，最多 10 個
     k = min(10, len(data["words"]))
     selected_words = random.choices(data["words"], weights=weights, k=k)
     
-    # 整理給 AI 的列表
     word_text = "\n".join([f"{w['kanji']} ({w['kana']}) : {w['meaning']}" for w in selected_words])
 
     genai.configure(api_key=GEMINI_API_KEY)
@@ -168,8 +164,12 @@ def run_daily_quiz(data):
     (最後附上參考答案與解析，但在前面加上 "--- 參考解答 ---")
     """
     
-    response = model.generate_content(prompt)
-    send_telegram(response.text)
+    try:
+        response = model.generate_content(prompt, safety_settings=SAFETY_SETTINGS)
+        send_telegram(response.text)
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        send_telegram("⚠️ AI 老師今天請假了 (API Error)")
 
 if __name__ == "__main__":
     # 1. 先處理使用者昨天輸入的單字

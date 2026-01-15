@@ -1,35 +1,45 @@
-name: 🇯🇵 N2 Daily Spartan
+name: 🇯🇵 Japanese Spartan Quiz
 on:
   schedule:
-    - cron: '0 0 * * *' # 每天早上 08:00
-  workflow_dispatch: # 允許手動按按鈕測試
+    # 每天台灣時間早上 08:00 (UTC 00:00)
+    - cron: '7 22 * * *'
+  workflow_dispatch: # 允許手動執行
+
+permissions:
+  contents: write
 
 jobs:
-  study_session:
+  run_job:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 必須有寫入權限才能存單字
-    
+      contents: write
+      
     steps:
       - uses: actions/checkout@v3
+      
       - uses: actions/setup-python@v4
         with: { python-version: '3.10' }
         
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-        
-      - name: Run Bot
+      - run: pip install requests google-generativeai
+      
+      - name: Run Spartan Bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python main.py
+        run: python Daily_Japanese.py
         
-      - name: Save Vocabulary
+      - name: Commit and Push (Save New Vocabulary)
         run: |
           git config --global user.name "N2 Bot"
-          git config --global user.email "bot@n2spartan.com"
+          git config --global user.email "bot@github.com"
+          
+          # 只存 JSON 檔
+          git add vocab.json
+          
+          # 如果沒有新單字，就不 Commit (避免錯誤)
+          git commit -m "📚 Vocabulary Updated" || echo "No changes to vocabulary"
+          
+          # 使用 Pull Rebase 策略 (與之前財經 Bot 一樣)
           git pull --rebase origin main
-          git add vocab.json || true
-          git commit -m "📚 Vocabulary Updated" || echo "No changes"
           git push
