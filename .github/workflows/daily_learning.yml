@@ -16,10 +16,8 @@ jobs:
       
     steps:
       - uses: actions/checkout@v3
-      
       - uses: actions/setup-python@v4
         with: { python-version: '3.10' }
-        
       - run: pip install requests google-generativeai
       
       - name: Run Spartan Bot
@@ -27,17 +25,17 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python Daily_Japanese.py
+        # 👇 這裡修改了檔名
+        run: python Daily_Japanese_v0.0.1.py
         
       - name: Commit and Push
         run: |
           git config --global user.name "N2 Bot"
           git config --global user.email "bot@github.com"
           
-          # 同時追蹤兩個 JSON 檔
+          # 👇 確保所有數據檔都被加入
           git add vocab.json user_data.json
           
-          git commit -m "📊 Update Data" || echo "No changes"
-          
+          git commit -m "📊 Update User Stats & Vocab" || echo "No changes"
           git pull origin HEAD --no-rebase
           git push
