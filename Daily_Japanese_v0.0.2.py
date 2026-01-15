@@ -15,7 +15,7 @@ TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 # 檔案設定
 VOCAB_FILE = "vocab.json"
 USER_DATA_FILE = "user_data.json"
-MODEL_NAME = 'models/gemini-2.5-flash' # 穩定且額度較高
+MODEL_NAME = 'models/gemini-2.5-flash' 
 
 # 安全設定
 SAFETY_SETTINGS = [
@@ -40,7 +40,6 @@ def load_json(filename, default_content):
     return default_content
 
 def save_json(filename, data):
-    # Log 截斷 (保留最近 30 筆翻譯紀錄，避免 Token 爆炸)
     if filename == USER_DATA_FILE and "translation_log" in data:
         if len(data["translation_log"]) > 30:
             data["translation_log"] = data["translation_log"][-30:]
@@ -52,9 +51,7 @@ def send_telegram(message):
     if not TG_BOT_TOKEN: print(f"[模擬發送] {message[:50]}..."); return
     if not message: return
 
-    # ✅ 排版淨化：移除 Markdown 粗體，將 HTML 換行轉為真實換行
     clean_msg = message.replace("**", "").replace("##", "").replace("__", "")
-    # 替換常見的 HTML 換行標籤
     clean_msg = re.sub(r'<br\s*/?>', '\n', clean_msg)
     
     try:
@@ -67,17 +64,17 @@ def normalize_text(text):
     if not text: return ""
     return text.strip().replace("　", " ").lower()
 
-# ================= AI 核心 =================
+# ================= AI 核心 (保持不動) =================
 
 def ai_correction(user_text, translation_history):
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(MODEL_NAME)
     
-    print(f"🤖 AI 正在批改: {user_text[:20]}...")
+    print(f"🤖 AI 正在批改 (合併後長度 {len(user_text)}): {user_text[:20]}...")
     history_str = "\n".join(translation_history[-10:]) if translation_history else "(尚無歷史紀錄)"
     
     prompt = f"""
-    使用者正在練習日文，這是她剛剛傳來的內容：
+    使用者正在練習日文，這是她剛剛傳來的內容（可能包含多則訊息的合併）：
     「{user_text}」
     
     【歷史紀錄】
@@ -85,7 +82,7 @@ def ai_correction(user_text, translation_history):
     
     請扮演日文教授完成批改：
     1. **📈 進度評估**：比較歷史紀錄，判斷是否有進步？給予鼓勵或警惕。
-    2. **🎯 批改**：修正錯誤 (✅/❌)。
+    2. **🎯 批改**：請針對上述內容進行批改，修正錯誤 (✅/❌)。
     3. **✨ 三種多樣化表達**：
        - 👔 正式
        - 🍻 口語
@@ -103,7 +100,7 @@ def ai_correction(user_text, translation_history):
     except Exception as e:
         return f"⚠️ AI 批改錯誤: {e}"
 
-# ================= 邏輯核心 =================
+# ================= 邏輯核心 (修改 regex 支援 / 分隔) =================
 
 def process_data():
     print("📥 開始處理資料...")
@@ -112,8 +109,8 @@ def process_data():
     user_data = load_json(USER_DATA_FILE, {
         "stats": {
             "last_active": "2000-01-01", 
-            "streak_days": 0,       # 連續天數 (Day X)
-            "execution_count": 0,   # 執行回數 (第 N 回)
+            "streak_days": 0,
+            "execution_count": 0,
             "last_quiz_date": "2000-01-01",
             "last_quiz_questions_count": 0,
             "yesterday_answers_count": 0
@@ -122,7 +119,6 @@ def process_data():
         "translation_log": []
     })
     
-    # 防呆初始化
     if "execution_count" not in user_data["stats"]: user_data["stats"]["execution_count"] = 0
     if "streak_days" not in user_data["stats"]: user_data["stats"]["streak_days"] = 0
 
@@ -138,6 +134,9 @@ def process_data():
         
         today_str = str(datetime.now().date())
         today_answers_accumulated = 0
+        
+        # 暫存需批改的文字，稍後合併發送 (省 API)
+        pending_correction_texts = []
 
         for item in response["result"]:
             if str(item["message"]["chat"]["id"]) != str(TG_CHAT_ID): continue
@@ -168,53 +167,74 @@ def process_data():
                 except: pass
                 continue
 
-            # Case B: 存單字
-            match = re.search(r"^(\S+)[ \u3000]+(\S+)[ \u3000]+(.+)$", text)
-            if match and len(text.split()) == 3:
+            # Case B: 存單字 (支援 空白分隔 或 /分隔)
+            # Regex 解釋：
+            # Group 1: 漢字 (排除 / 和 空白)
+            # 分隔符: (空白 或 /)
+            # Group 2: 假名 (排除 / 和 空白)
+            # 分隔符: (空白 或 /)
+            # Group 3: 意思 (剩餘部分)
+            match = re.search(r"^([^/\s]+)(?:[ \u3000]+|/)([^/\s]+)(?:[ \u3000]+|/)(.+)$", text)
+            
+            if match:
                 kanji, kana, meaning = match.groups()
-                found = False
-                for word in vocab_data["words"]:
-                    if normalize_text(word["kanji"]) == normalize_text(kanji):
-                        word["count"] += 1 
-                        updates_log.append(f"🔄 強化記憶：{kanji}")
-                        found = True
+                # 排除像 "Part A" 這樣的標題被誤認為單字
+                if not kanji.lower().startswith("part") and len(text) < 50: 
+                    found = False
+                    for word in vocab_data["words"]:
+                        if normalize_text(word["kanji"]) == normalize_text(kanji):
+                            word["count"] += 1 
+                            updates_log.append(f"🔄 強化記憶：{kanji}")
+                            found = True
+                            is_updated = True
+                            break
+                    if not found:
+                        vocab_data["words"].append({
+                            "kanji": kanji, "kana": kana, "meaning": meaning, 
+                            "count": 1, "added_date": today_str
+                        })
+                        updates_log.append(f"✅ 收錄：{kanji}")
                         is_updated = True
-                        break
-                if not found:
-                    vocab_data["words"].append({
-                        "kanji": kanji, "kana": kana, "meaning": meaning, 
-                        "count": 1, "added_date": today_str
-                    })
-                    updates_log.append(f"✅ 收錄：{kanji}")
-                    is_updated = True
-                continue
+                    continue
 
-            # Case C: 翻譯/作業
-            elif not text.startswith("/"):
+            # Case C: 翻譯/作業 (不需指令，自動合併)
+            if not text.startswith("/"):
+                # 計算答題量 (用換行數判定)
                 lines_count = len([l for l in text.split('\n') if len(l.strip()) > 1])
                 lines_count = max(1, lines_count)
                 today_answers_accumulated += lines_count
                 
-                result = ai_correction(text, user_data["translation_log"])
-                correction_msgs.append(f"📝 **作業/練習批改：**\n{result}")
+                # 存入暫存區 (合併用)
+                pending_correction_texts.append(text)
                 
+                # 寫入 Log
                 user_data["translation_log"].append(f"{today_str}: {text[:50]}")
                 is_updated = True
-                time.sleep(2)
 
-        # 結算數據 (處理 streak_days)
-        # 邏輯：如果今天的日期 跟 last_active 不同，且今天有活動，則天數 +1
-        # 如果是同一天多次執行，這個 if 就不會進去，streak_days 不會增加 (符合需求)
+        # === 迴圈結束後，統一批改 (API 呼叫 1 次) ===
+        if pending_correction_texts:
+            # 將多則訊息合併
+            combined_text = "\n\n".join(pending_correction_texts)
+            
+            # 傳給 AI
+            # 扣除本次新增的 Log 以免重複
+            history_context = user_data["translation_log"][:-len(pending_correction_texts)]
+            result = ai_correction(combined_text, history_context)
+            
+            if len(pending_correction_texts) > 1:
+                correction_msgs.append(f"📝 **作業/練習批改 (共 {len(pending_correction_texts)} 則合併)：**\n{result}")
+            else:
+                correction_msgs.append(f"📝 **作業/練習批改：**\n{result}")
+
+        # 結算數據
         if user_data["stats"]["last_active"] != today_str:
             user_data["stats"]["yesterday_answers_count"] = today_answers_accumulated
-            
             if today_answers_accumulated > 0 or is_updated:
                  yesterday = str((datetime.now() - timedelta(days=1)).date())
                  if user_data["stats"]["last_active"] == yesterday:
                      user_data["stats"]["streak_days"] += 1
                  else:
-                     user_data["stats"]["streak_days"] = 1 # 斷掉了，重算
-                 
+                     user_data["stats"]["streak_days"] = 1
                  user_data["stats"]["last_active"] = today_str
                  is_updated = True
 
@@ -229,27 +249,25 @@ def process_data():
         print(f"Error: {e}")
         return load_json(VOCAB_FILE, {}), load_json(USER_DATA_FILE, {})
 
-# ================= 每日特訓生成 =================
+# ================= 每日特訓生成 (保持不動) =================
 
 def run_daily_quiz(vocab, user):
     if not vocab.get("words"):
         send_telegram("📭 單字庫空的！請傳送單字或匯入 JSON。")
         return user
     
-    # ✅ 執行回數 +1 (不論日期，每次呼叫都加)
     user["stats"]["execution_count"] += 1
     exec_count = user["stats"]["execution_count"]
     streak_days = user["stats"]["streak_days"]
 
-    # 1. 發送昨天的詳解 (延遲回饋)
+    # 1. 發送昨天的詳解
     pending_answers = user.get("pending_answers", "")
     if pending_answers:
         send_telegram(f"🗝️ **昨日測驗詳解**\n\n{pending_answers}")
-        time.sleep(3) # 讓使用者有時間消化
+        time.sleep(3)
         user["pending_answers"] = ""
     
     # 2. 判斷情緒 Prompt
-    # 邏輯修正：如果是第一次執行 (Count=1 或 Date=2000)，強制天使模式
     is_first_run = user["stats"]["last_quiz_date"] == "2000-01-01" or exec_count == 1
     questions_given = user["stats"].get("last_quiz_questions_count", 0)
     answers_given = user["stats"].get("yesterday_answers_count", 0)
@@ -257,7 +275,6 @@ def run_daily_quiz(vocab, user):
     emotion_prompt = ""
     
     if is_first_run:
-        # 🌟 強制天使模式
         emotion_prompt = """
         這是你第一次與使用者見面 (Day 1)。
         請用充滿活力、專業且期待的語氣打招呼。
@@ -272,7 +289,6 @@ def run_daily_quiz(vocab, user):
         elif answer_rate >= 0.3:
             emotion_prompt = f"昨日表現：回覆 {answers_given}/{questions_given} 題。狀態：尚可。給予肯定但要求更多。"
         else:
-            # 幽默情勒，不要太流氓
             emotion_prompt = f"""
             昨日表現：回覆 {answers_given}/{questions_given} 題。
             狀態：偷懶！請開啟【幽默情勒模式 😈】。
@@ -327,14 +343,10 @@ def run_daily_quiz(vocab, user):
         response = model.generate_content(prompt, safety_settings=SAFETY_SETTINGS)
         if response.text:
             full_text = response.text
-            
             if "|||SEPARATOR|||" in full_text:
                 parts = full_text.split("|||SEPARATOR|||")
-                question_part = parts[0].strip()
-                answer_part = parts[1].strip()
-                
-                send_telegram(question_part)
-                user["pending_answers"] = answer_part
+                send_telegram(parts[0].strip())
+                user["pending_answers"] = parts[1].strip()
             else:
                 send_telegram(full_text)
                 user["pending_answers"] = ""
